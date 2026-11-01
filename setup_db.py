@@ -3,13 +3,39 @@ import os
 import tempfile
 
 import streamlit as st
-
-from shopping_agent import agent, describe_product_image, get_rating, search_products
+from streamlit.errors import StreamlitSecretNotFoundError
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="AI Shopping Assistant", page_icon="🛒", layout="wide")
+
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv()
+
+groq_api_key = os.environ.get("GROQ_API_KEY")
+if not groq_api_key:
+    try:
+        groq_api_key = st.secrets.get("GROQ_API_KEY")
+    except StreamlitSecretNotFoundError:
+        groq_api_key = None
+
+if not groq_api_key:
+    st.error(
+        "The app is missing its Groq API key. In Streamlit Cloud, open "
+        "Manage app → Settings → Secrets and add the configuration below."
+    )
+    st.code('GROQ_API_KEY = "your_groq_api_key"', language="toml")
+    st.stop()
+
+os.environ["GROQ_API_KEY"] = groq_api_key
+
+from shopping_agent import agent, describe_product_image, get_rating, search_products
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
