@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import uuid
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
@@ -35,10 +36,18 @@ if not groq_api_key:
 
 os.environ["GROQ_API_KEY"] = groq_api_key
 
-from shopping_agent import agent, describe_product_image, get_rating, search_products
+from shopping_agent import (
+    describe_product_image,
+    get_rating,
+    run_shopping_agent,
+    search_products,
+    shopper_scope,
+)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "shopper_id" not in st.session_state:
+    st.session_state.shopper_id = uuid.uuid4().hex
 
 st.title("🛒 AI Shopping Assistant")
 st.caption("Tell me what you want — I'll search, rate, and order the best match for you.")
@@ -47,6 +56,8 @@ st.caption("Tell me what you want — I'll search, rate, and order the best matc
 # Sidebar — shop by image
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    st.text_input("Shopper profile ID", key="shopper_id")
+    st.caption("Keep this ID to retrieve your preferences and orders in later sessions.")
     st.header("Shop by Image")
     st.caption("Upload a photo of a product and I'll find similar items in our store.")
 
@@ -110,7 +121,8 @@ if (
                     search_args: dict[str, str | bool] = {"query": query}
                     if image_info.get("is_organic") is not None:
                         search_args["is_organic"] = image_info["is_organic"]
-                    products = json.loads(search_products.invoke(search_args))
+                    with shopper_scope(st.session_state.shopper_id):
+                        products = json.loads(search_products.invoke(search_args))
 
                     if not products:
                         response = (
@@ -161,7 +173,7 @@ if prompt := st.chat_input("e.g. I want organic honey under $15 with 4+ rating")
                 }
                 for message in st.session_state.messages
             ]
-            result = agent.invoke({"messages": messages})
+            result = run_shopping_agent(messages, st.session_state.shopper_id)
             response = result["messages"][-1].content.replace("`", "")
         st.markdown(response.replace("$", r"\$"))
 

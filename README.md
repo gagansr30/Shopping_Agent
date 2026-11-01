@@ -12,8 +12,10 @@ review, and order data are stored in SQLite.
 - Upload a JPG, JPEG, PNG, or WebP image to identify a product and find
   catalog matches.
 - Place a demo order after explicitly confirming a product.
-- Keep the product catalog, reviews, and orders in the local `store.db`
-  database.
+- Retrieve order history and save organic/maximum-price preferences per shopper.
+- Reject requests unrelated to shopping before they reach the shopping agent.
+- Keep the product catalog, reviews, orders, and preferences in the local
+  `store.db` database.
 
 ## Requirements
 
@@ -77,11 +79,24 @@ uv run python shopping_agent.py
 The CLI example searches for organic honey under $20 with a rating of at least
 4.5 stars.
 
+## Run the evaluations
+
+With `GROQ_API_KEY` configured, run:
+
+```powershell
+uv run python evaluations.py
+```
+
+The evaluation checks expected tool calls and parameters for a small shopping
+query set, then uses an LLM judge to score relevance, product correctness, and
+numbered-list format compliance. It does not place orders.
+
 ## Project files
 
 - `setup_db.py` — Streamlit chat and image-upload interface.
 - `shopping_agent.py` — LangChain agent and product, rating, checkout, and
   image-analysis tools.
+- `evaluations.py` — live tool-call assertions and LLM-as-judge response checks.
 - `reviews_api.py` — SQLite queries for product ratings.
 - `store.db` — local SQLite database containing the product catalog, reviews,
   and orders.
