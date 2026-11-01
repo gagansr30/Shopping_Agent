@@ -5,15 +5,38 @@ import sqlite3
 import sys
 from typing import Optional
 
-from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage
 from langchain_groq import ChatGroq
+from streamlit.errors import StreamlitSecretNotFoundError
 
 from reviews_api import get_product_rating
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv()
+
+if not os.environ.get("GROQ_API_KEY"):
+    try:
+        import streamlit as st
+
+        groq_api_key = st.secrets.get("GROQ_API_KEY")
+    except StreamlitSecretNotFoundError:
+        groq_api_key = None
+
+    if groq_api_key:
+        os.environ["GROQ_API_KEY"] = groq_api_key
+
+if not os.environ.get("GROQ_API_KEY"):
+    raise RuntimeError(
+        "GROQ_API_KEY is not configured. Set it in Streamlit Cloud app secrets "
+        "or in a local .env file."
+    )
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "store.db")
 
