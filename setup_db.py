@@ -1,14 +1,18 @@
+import json
 import os
 import tempfile
 
 import streamlit as st
 
-from shopping_agent import agent
+from shopping_agent import agent, describe_product_image, get_rating, search_products
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="AI Shopping Assistant", page_icon="🛒", layout="wide")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 st.title("🛒 AI Shopping Assistant")
 st.caption("Tell me what you want — I'll search, rate, and order the best match for you.")
@@ -33,42 +37,82 @@ with st.sidebar:
             tmp.write(uploaded_file.getvalue())
             image_path = tmp.name
 
-        prompt = f"I uploaded a product image. Please analyze it and find similar products in the store. Image path: {image_path}"
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        st.session_state.pending_image = uploaded_file.name
+        st.session_state.messages.append({
+            "role": "user",
+            "content": f"I uploaded a product image: {uploaded_file.name}",
+        })
+        st.session_state.pending_image_path = image_path
         st.rerun()
 
 # ---------------------------------------------------------------------------
 # Chat state
 # ---------------------------------------------------------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 # Render history — show a friendlier label for image-search messages
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        if msg["role"] == "user" and msg["content"].startswith("I uploaded a product image"):
-            filename = msg["content"].split("Image path:")[-1].strip()
-            st.markdown(f"Searching by image: **{os.path.basename(filename)}**")
+        if msg["role"] == "user" and msg["content"].startswith("I uploaded a product image:"):
+            filename = msg["content"].split(":", 1)[-1].strip()
+            st.markdown(f"Searching by image: **{filename}**")
         else:
             st.markdown(msg["content"].replace("$", r"\$"))
 
 # ---------------------------------------------------------------------------
-# Run agent if there's an unprocessed message (image upload triggers this)
+# Analyze an uploaded image using its saved path, outside the text agent.
 # ---------------------------------------------------------------------------
 if (
     st.session_state.messages
     and st.session_state.messages[-1]["role"] == "user"
-    and "pending_image" in st.session_state
+    and "pending_image_path" in st.session_state
 ):
-    with st.chat_message("assistant"):
-        with st.spinner("Analyzing image and searching…"):
-            result = agent.invoke({"messages": st.session_state.messages})
-            response = result["messages"][-1].content.replace("`", "")
-        st.markdown(response.replace("$", r"\$"))
+    image_path = st.session_state.pending_image_path
+    response = ""
+    try:
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing image and searching…"):
+                image_info = json.loads(
+                    describe_product_image.invoke({"image_path": image_path})
+                )
+                query = str(image_info.get("search_query") or "").strip()
+                product_type = str(image_info.get("product_type") or "unknown").strip()
+
+                if not query or product_type.lower() == "unknown":
+                    response = (
+                        "I could not find a shopping product in this image. "
+                        "Please upload a product photo you want to shop for."
+                    )
+                else:
+                    search_args: dict[str, str | bool] = {"query": query}
+                    if image_info.get("is_organic") is not None:
+                        search_args["is_organic"] = image_info["is_organic"]
+                    products = json.loads(search_products.invoke(search_args))
+
+                    if not products:
+                        response = (
+                            f"I identified this as {product_type}, but no matching "
+                            "product was found in our catalog."
+                        )
+                    else:
+                        lines = [f"I identified this as {product_type}. Here are the matches:"]
+                        for index, product in enumerate(products, start=1):
+                            rating = json.loads(get_rating.invoke({"product_id": product["id"]}))
+                            organic_label = "organic" if product["is_organic"] else "non-organic"
+                            lines.append(
+                                f"#{index}. {product['name']} (ID:{product['id']}) — "
+                                f"${product['price']:.2f} ★{rating['average_rating']} — "
+                                f"{organic_label}"
+                            )
+                        lines.append("Would you like to order one? Just say yes or give me the number.")
+                        response = "\n\n".join(lines)
+            st.markdown(response.replace("$", r"\$"))
+    except Exception as exc:
+        response = f"I couldn't analyze that uploaded image: {exc}"
+        st.error(response)
+    finally:
+        if os.path.exists(image_path):
+            os.unlink(image_path)
+        del st.session_state.pending_image_path
 
     st.session_state.messages.append({"role": "assistant", "content": response})
-    del st.session_state.pending_image
     st.rerun()
 
 # ---------------------------------------------------------------------------
@@ -81,7 +125,17 @@ if prompt := st.chat_input("e.g. I want organic honey under $15 with 4+ rating")
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking…"):
-            result = agent.invoke({"messages": st.session_state.messages})
+            messages = [
+                {
+                    **message,
+                    "content": "I uploaded a product image earlier."
+                    if message["role"] == "user"
+                    and message["content"].startswith("I uploaded a product image. Please analyze it")
+                    else message["content"],
+                }
+                for message in st.session_state.messages
+            ]
+            result = agent.invoke({"messages": messages})
             response = result["messages"][-1].content.replace("`", "")
         st.markdown(response.replace("$", r"\$"))
 

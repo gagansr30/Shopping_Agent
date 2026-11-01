@@ -190,16 +190,10 @@ def describe_product_image(image_path: str) -> str:
 # ---------------------------------------------------------------------------
 
 agent = create_agent(
-    tools=[search_products, get_rating, checkout, describe_product_image],
+    tools=[search_products, get_rating, checkout],
     model=llm,
     system_prompt=(
         "You are a helpful shopping assistant. Follow these rules strictly.\n\n"
-        "IMAGE SEARCH — when the user provides an image path:\n"
-        "1. Call describe_product_image with the path to identify the product.\n"
-        "2. If the returned search_query is empty, product_type is 'unknown', or the image is clearly not a product, do not call search_products. Reply: 'I could not find a shopping product in this image. Please upload a product photo you want to shop for.'\n"
-        "3. Otherwise use the returned search_query and is_organic to call search_products.\n"
-        "4. If search_products returns no matches, reply: 'No matching shopping product was found in this image or our catalog. This does not look like an item we sell.'\n"
-        "5. Continue with the BROWSING flow from step 2 onwards.\n\n"
         "BROWSING — when the user describes what they want to buy:\n"
         "1. Call search_products to find matching items (apply any price/organic filters given).\n"
         "2. For each candidate, call get_rating to retrieve its average rating.\n"
