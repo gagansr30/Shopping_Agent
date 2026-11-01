@@ -55,6 +55,19 @@ uv run streamlit run setup_db.py
 Streamlit prints a local URL (usually `http://localhost:8501`) when the app is
 ready.
 
+## Deploy to Streamlit Community Cloud
+
+1. Connect the GitHub repository in Streamlit Community Cloud.
+2. Set the app's main file path to `setup_db.py`.
+3. Add `GROQ_API_KEY` under the app's **Settings → Secrets** using TOML syntax:
+
+   ```toml
+   GROQ_API_KEY = "your_groq_api_key"
+   ```
+
+The root-level `requirements.txt` lists the app's runtime dependencies and is
+used by Streamlit Community Cloud during deployment.
+
 ## Run the command-line example
 
 ```powershell
