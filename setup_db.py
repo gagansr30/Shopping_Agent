@@ -3,6 +3,7 @@ import os
 import tempfile
 import uuid
 
+from groq import AuthenticationError
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
@@ -20,21 +21,34 @@ if load_dotenv is not None:
     load_dotenv()
 
 groq_api_key = os.environ.get("GROQ_API_KEY")
-if not groq_api_key:
-    try:
-        groq_api_key = st.secrets.get("GROQ_API_KEY")
-    except StreamlitSecretNotFoundError:
-        groq_api_key = None
+google_api_key = os.environ.get("GOOGLE_API_KEY")
+for key_name, key_value in (
+    ("GROQ_API_KEY", groq_api_key),
+    ("GOOGLE_API_KEY", google_api_key),
+):
+    if not key_value:
+        try:
+            key_value = st.secrets.get(key_name)
+        except StreamlitSecretNotFoundError:
+            key_value = None
+    if key_value:
+        os.environ[key_name] = key_value
+    if key_name == "GROQ_API_KEY":
+        groq_api_key = key_value
+    else:
+        google_api_key = key_value
 
-if not groq_api_key:
+if not groq_api_key and not google_api_key:
     st.error(
-        "The app is missing its Groq API key. In Streamlit Cloud, open "
-        "Manage app → Settings → Secrets and add the configuration below."
+        "The app needs a Groq API key, a Google API key, or both. In Streamlit "
+        "Cloud, open Manage app → Settings → Secrets and add one or both keys."
     )
-    st.code('GROQ_API_KEY = "your_groq_api_key"', language="toml")
+    st.code(
+        'GROQ_API_KEY = "your_groq_api_key"\n'
+        'GOOGLE_API_KEY = "your_google_api_key"',
+        language="toml",
+    )
     st.stop()
-
-os.environ["GROQ_API_KEY"] = groq_api_key
 
 from shopping_agent import (
     describe_product_image,
@@ -173,9 +187,18 @@ if prompt := st.chat_input("e.g. I want organic honey under $15 with 4+ rating")
                 }
                 for message in st.session_state.messages
             ]
-            result = run_shopping_agent(messages, st.session_state.shopper_id)
-            response = result["messages"][-1].content.replace("`", "")
-        st.markdown(response.replace("$", r"\$"))
+            try:
+                result = run_shopping_agent(messages, st.session_state.shopper_id)
+                response = result["messages"][-1].content.replace("`", "")
+            except AuthenticationError:
+                response = (
+                    "Groq rejected its API key, and no working Google fallback was "
+                    "available. Add a valid `GOOGLE_API_KEY` to Streamlit Cloud "
+                    "Secrets (or fix `GROQ_API_KEY`) and reboot the app."
+                )
+                st.error(response)
+            else:
+                st.markdown(response.replace("$", r"\$"))
 
     st.session_state.messages.append({"role": "assistant", "content": response})
     st.rerun()

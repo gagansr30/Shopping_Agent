@@ -7,9 +7,12 @@ import sys
 from contextlib import contextmanager
 from typing import Optional
 
+from groq import APIError as GroqAPIError
 from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_model_call
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from streamlit.errors import StreamlitSecretNotFoundError
 
@@ -23,21 +26,27 @@ except ModuleNotFoundError:
 if load_dotenv is not None:
     load_dotenv()
 
-if not os.environ.get("GROQ_API_KEY"):
+def _load_api_key(name: str) -> Optional[str]:
+    api_key = os.environ.get(name)
+    if api_key:
+        return api_key
     try:
         import streamlit as st
 
-        groq_api_key = st.secrets.get("GROQ_API_KEY")
+        api_key = st.secrets.get(name)
     except StreamlitSecretNotFoundError:
-        groq_api_key = None
+        api_key = None
+    if api_key:
+        os.environ[name] = api_key
+    return api_key
 
-    if groq_api_key:
-        os.environ["GROQ_API_KEY"] = groq_api_key
+groq_api_key = _load_api_key("GROQ_API_KEY")
+google_api_key = _load_api_key("GOOGLE_API_KEY")
 
-if not os.environ.get("GROQ_API_KEY"):
+if not groq_api_key and not google_api_key:
     raise RuntimeError(
-        "GROQ_API_KEY is not configured. Set it in Streamlit Cloud app secrets "
-        "or in a local .env file."
+        "Configure GROQ_API_KEY, GOOGLE_API_KEY, or both in Streamlit Cloud app "
+        "secrets or in a local .env file."
     )
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "store.db")
@@ -91,8 +100,41 @@ def _load_preferences(user_id: str) -> dict[str, str]:
     conn.close()
     return dict(rows)
 
-llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0, max_tokens=512)
-vision_llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0, max_tokens=512)
+groq_llm = (
+    ChatGroq(model="qwen/qwen3.8-27b", temperature=0, max_tokens=512)
+    if groq_api_key
+    else None
+)
+google_llm = (
+    ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        temperature=0,
+        max_tokens=512,
+    )
+    if google_api_key
+    else None
+)
+llm = groq_llm or google_llm
+vision_llm = llm
+
+
+def _invoke_with_fallback(model, messages):
+    try:
+        return model.invoke(messages)
+    except GroqAPIError:
+        if google_llm is None or model is google_llm:
+            raise
+        return google_llm.invoke(messages)
+
+
+@wrap_model_call
+def groq_fallback(request, handler):
+    try:
+        return handler(request)
+    except GroqAPIError:
+        if google_llm is None:
+            raise
+        return handler(request.override(model=google_llm))
 
 
 def sanitize_search_query(value: Optional[str]) -> str:
@@ -301,7 +343,7 @@ def describe_product_image(image_path: str) -> str:
     ])
 
     try:
-        response = vision_llm.invoke([message])
+        response = _invoke_with_fallback(vision_llm, [message])
         parsed = response.content
         try:
             data = json.loads(parsed)
@@ -339,7 +381,8 @@ def is_shopping_related(message: str, history: Optional[list] = None) -> bool:
         for item in (history or [])[-6:]
         if isinstance(item, dict)
     ]
-    result = llm.invoke(
+    result = _invoke_with_fallback(
+        llm,
         [
             (
                 "system",
@@ -353,7 +396,7 @@ def is_shopping_related(message: str, history: Optional[list] = None) -> bool:
                 "human",
                 json.dumps({"recent_history": recent_history, "latest_message": message}),
             ),
-        ]
+        ],
     )
     return str(result.content).strip().upper() == "SHOPPING"
 
@@ -375,6 +418,8 @@ def run_shopping_agent(messages: list, user_id: str = "anonymous") -> dict:
     with shopper_scope(user_id):
         return agent.invoke({"messages": messages})
 
+agent_middleware = [groq_fallback] if groq_llm and google_llm else []
+
 agent = create_agent(
     tools=[
         search_products,
@@ -384,6 +429,7 @@ agent = create_agent(
         get_order_history,
     ],
     model=llm,
+    middleware=agent_middleware,
     system_prompt=(
         "You are a helpful shopping assistant. Follow these rules strictly.\n\n"
         "MEMORY — call get_order_history only when the user explicitly asks about past orders; "

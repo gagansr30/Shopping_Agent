@@ -2,7 +2,7 @@
 
 A Streamlit shopping assistant that searches a local product catalog, retrieves
 customer ratings, analyzes uploaded product images, and can place demo orders.
-The assistant uses LangChain with Groq-hosted language models. Product,
+The assistant uses Groq with Google Gemini as an automatic fallback. Product,
 review, and order data are stored in SQLite.
 
 ## Features
@@ -21,7 +21,7 @@ review, and order data are stored in SQLite.
 
 - Python 3.14 or newer
 - [uv](https://docs.astral.sh/uv/)
-- A Groq API key
+- A Groq API key and/or a Google API key (Google enables fallback when Groq fails)
 
 ## Setup
 
@@ -38,10 +38,13 @@ review, and order data are stored in SQLite.
    uv sync
    ```
 
-3. Create a `.env` file in the project root and add your Groq API key:
+3. Create a `.env` file in the project root and add your provider API keys.
+   At least one key is required; set both to enable automatic Groq-to-Google
+   fallback:
 
    ```dotenv
    GROQ_API_KEY=your_groq_api_key
+   GOOGLE_API_KEY=your_google_api_key
    ```
 
    Keep `.env` private; it is excluded from Git.
@@ -61,10 +64,13 @@ ready.
 
 1. Connect the GitHub repository in Streamlit Community Cloud.
 2. Set the app's main file path to `setup_db.py`.
-3. Add `GROQ_API_KEY` under the app's **Settings → Secrets** using TOML syntax:
+3. Add `GROQ_API_KEY`, `GOOGLE_API_KEY`, or both under the app's
+   **Settings → Secrets** using TOML syntax. Set `GOOGLE_API_KEY` to enable
+   fallback when a Groq request fails:
 
    ```toml
    GROQ_API_KEY = "your_groq_api_key"
+   GOOGLE_API_KEY = "your_google_api_key"
    ```
 
 The root-level `requirements.txt` lists the app's runtime dependencies and is
